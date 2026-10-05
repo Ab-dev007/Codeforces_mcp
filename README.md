@@ -1,177 +1,106 @@
 # Codeforces MCP Server
 
-A custom MCP (Model Context Protocol) server that connects Claude AI to the Codeforces public API. Built to streamline competitive programming problem logging — Claude can automatically fetch your latest submission data instead of you having to type it manually.
+A Python MCP server that connects Claude and compatible MCP clients to the Codeforces public API. Fetch submissions, ratings, and contest data without manually copying problem details into a conversation.
 
----
+**Python · FastMCP · httpx · Streamable HTTP**
 
-## What is MCP?
+## Why I built this
 
-MCP (Model Context Protocol) is a protocol developed by Anthropic that lets Claude connect to external services and tools. Instead of Claude only knowing what you type, it can directly call APIs, read databases, and interact with external services on your behalf.
+Competitive programming practice involves more than submitting a solution. Reviewing the approach and recording what went wrong are useful parts of the process. This server retrieves problem metadata and submission results so the conversation can focus on difficulty, reasoning, and lessons learned.
 
-This project turns the Codeforces public API into an MCP server that Claude can use as a custom connector.
+The server supplies Codeforces data; it does not itself store a problem log or submit solutions.
 
----
+## Available tools
 
-## What Does This Server Do?
+| Tool | Purpose | Codeforces endpoint |
+| --- | --- | --- |
+| `get_user_submissions` | Recent submissions, including problem metadata and verdicts | `user.status` |
+| `get_user_info` | User profiles, ratings, and ranks | `user.info` |
+| `get_user_rating` | Contest rating history | `user.rating` |
+| `get_contest_standings` | Contest standings, optionally filtered by handle | `contest.standings` |
+| `get_contest_status` | Contest submissions with optional filters | `contest.status` |
+| `get_contest_list` | Past and upcoming contests | `contest.list` |
 
-Once connected to Claude, this server gives Claude the ability to:
+Example requests after connecting an MCP client:
 
-| Tool | What it does |
-|------|-------------|
-| `get_user_submissions` | Fetch your latest CF submissions with problem name, rating, tags, verdict, contest ID |
-| `get_user_info` | Get your current rating, rank, and profile info |
-| `get_user_rating` | Get your full rating history across all contests |
-| `get_contest_standings` | Check your rank in any specific contest |
-| `get_contest_status` | Get all submissions from a specific contest |
-| `get_contest_list` | List all past and upcoming Codeforces contests |
+- “Fetch my latest five Codeforces submissions for the handle I provide.”
+- “Show my rating changes across recent contests.”
+- “List upcoming Codeforces contests.”
 
-### Primary Use Case
+These are example prompts, not recorded execution results.
 
-The main reason this was built is to automate problem logging. When solving problems on Codeforces, instead of manually providing the problem name, number, rating, and tags every time — Claude fetches all of that automatically from your submission history. You only need to provide:
-- How difficult it felt
-- What happened during solving
-- What you learned
+## How it works
 
----
-
-## Project Structure
-
-```
-codeforces-mcp/
-├── codeforces_mcp.py    # Main server file — all tools and API logic
-├── requirements.txt      # Python dependencies
-├── .gitignore           # Files excluded from version control
-└── README.md            # This file
-```
-
----
-
-## How It Works
-
-```
-Claude → MCP Connector URL → This Server → Codeforces Public API → Back to Claude
+```text
+Claude / MCP client
+        |
+        | Streamable HTTP
+        v
+Python MCP server
+        |
+        | Async HTTP requests
+        v
+Codeforces public API
 ```
 
-1. Claude receives a trigger from the user
-2. Claude calls the appropriate tool on this MCP server
-3. The server makes a request to the Codeforces public API
-4. Codeforces returns the data
-5. The server sends it back to Claude
-6. Claude uses that data to respond
+The implementation uses a shared `httpx.AsyncClient` with a 30-second timeout, checks HTTP and Codeforces API errors, and returns formatted JSON strings or error messages to the caller. The six tools use public API methods and do not require a Codeforces API key.
 
-The Codeforces API is completely public — no authentication or API keys required.
+## Run locally
 
----
-
-## Tech Stack
-
-- **Python 3.11**
-- **FastMCP** (`mcp[server]<2`) — framework for building MCP servers
-- **httpx** — async HTTP client for making API requests
-- **uvicorn** — ASGI server (comes with mcp[server])
-- **SSE (Server-Sent Events)** — transport protocol used by Claude to communicate with MCP servers
-
----
-
-## Local Setup
-
-### Prerequisites
-- Python 3.11
-- Miniforge / Conda
-
-### Step 1 — Clone the repo
+Prerequisites: Git and Python 3.11. The commands below use Conda, matching the project's existing setup.
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/codeforces-mcp.git
-cd codeforces-mcp
-```
+git clone https://github.com/MindForge-Abhishek/Codeforces_mcp.git
+cd Codeforces_mcp
 
-### Step 2 — Create conda environment
-
-```bash
 conda create -n codeforces-mcp python=3.11
 conda activate codeforces-mcp
-```
-
-### Step 3 — Install dependencies
-
-```bash
 pip install -r requirements.txt
+
+python codeforces_mcp.py
 ```
 
-### Step 4 — Run the server
+The server binds to `0.0.0.0:8000`. For a compatible local client, use:
 
-```bash
-python3 codeforces_mcp.py
+```text
+http://127.0.0.1:8000/mcp
 ```
 
-You should see:
-```
-INFO: Starting Codeforces MCP server...
-INFO: Uvicorn running on http://127.0.0.1:8000
-```
+The current implementation calls `server.streamable_http_app()`. Use the Streamable HTTP `/mcp` endpoint, rather than the legacy SSE `/sse` endpoint.
 
----
+## Connect from Claude
 
-## Deployment (Railway)
+For a remote Claude connector, deploy the server to an HTTPS host that Claude can reach. Add the deployed address ending in `/mcp` through Claude's connector settings.
 
-The server needs to be deployed to a hosting platform so Claude can reach it over the internet. Railway is the recommended option — free tier is sufficient.
+When deploying your own instance:
 
-### Step 1 — Create a Railway account
-Go to [railway.app](https://railway.app) and sign up with GitHub.
+1. Install the dependencies from `requirements.txt`.
+2. Start the server with `python codeforces_mcp.py`; the repository also includes a `Procfile`.
+3. Configure the hosting service to route requests to port `8000`, which is currently fixed in the code.
+4. Add your deployment hostname to `TransportSecuritySettings.allowed_hosts` in `create_server()`.
+5. Configure the client to use your HTTPS address with the `/mcp` path.
 
-### Step 2 — Create a new project
-- Click **New Project**
-- Select **Deploy from GitHub repo**
-- Select this repo
+The existing hostname in the source is specific to the original deployment. Hostname validation is not user authentication; the current implementation does not add application-level authentication or rate limiting.
 
-### Step 3 — Add a Procfile
-Create a file called `Procfile` (no extension) in the root of the project:
-```
-web: python3 codeforces_mcp.py
-```
-Push this to GitHub — Railway will use it to know how to start the server.
+## Project structure
 
-### Step 4 — Get your public URL
-Railway will give you a URL like:
-```
-https://codeforces-mcp-production.up.railway.app
+```text
+Codeforces_mcp/
+├── codeforces_mcp.py    # API client, six MCP tools, and server entry point
+├── requirements.txt    # Python dependencies
+├── Procfile            # Deployment start command
+├── .gitignore
+└── README.md
 ```
 
----
+## Current limitations
 
-## Connecting to Claude
+- Requests depend on Codeforces availability and API limits.
+- Errors are returned as readable strings; clients should distinguish them from JSON data.
+- The server retrieves data but does not persist reflections or problem logs.
+- Deployment configuration includes a fixed port and an explicit host allowlist.
 
-Once deployed:
+## References
 
-1. Go to [claude.ai](https://claude.ai)
-2. Open **Settings** → **Connectors**
-3. Click **Add custom connector**
-4. Paste your Railway URL with `/sse` at the end:
-```
-https://codeforces-mcp-production.up.railway.app/sse
-```
-5. Save — Claude can now use all the tools in this server
-
----
-
-## Available API Endpoints (Internal)
-
-These are the Codeforces API endpoints this server uses internally:
-
-| Server Tool | CF API Endpoint |
-|-------------|----------------|
-| `get_user_submissions` | `user.status` |
-| `get_user_info` | `user.info` |
-| `get_user_rating` | `user.rating` |
-| `get_contest_standings` | `contest.standings` |
-| `get_contest_status` | `contest.status` |
-| `get_contest_list` | `contest.list` |
-
-Full Codeforces API documentation: [codeforces.com/apiHelp](https://codeforces.com/apiHelp)
-
----
-
-## Why Not Use the CF API Directly?
-
-Claude's `web_fetch` tool goes through Anthropic's proxy server, which intercepts and rewrites certain URLs — making direct CF API calls unreliable from inside Claude. This MCP server solves that by acting as a middleman that Claude can reliably call.
+- [Codeforces API documentation](https://codeforces.com/apiHelp)
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
